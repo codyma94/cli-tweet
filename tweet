@@ -1,0 +1,107 @@
+#!/usr/bin/env python
+
+import argparse
+import oauth2 as oauth
+import urllib2 as urllib
+import json
+import sys
+import os
+from HTMLParser import HTMLParser
+
+access_token_key = "<ACCESS TOKEN>"
+access_token_secret = "<ACCESS TOKEN SECRET>"
+
+consumer_key = "<API KEY>"
+consumer_secret = "<API SECRET>"
+
+oauth_token = oauth.Token(key=access_token_key, secret=access_token_secret)
+oauth_consumer = oauth.Consumer(key=consumer_key, secret=consumer_secret)
+
+signature_method_hmac_sha1 = oauth.SignatureMethod_HMAC_SHA1()
+
+http_handler = urllib.HTTPHandler()
+https_handler = urllib.HTTPSHandler()
+
+def twitterreq(url, method, params):
+    req = oauth.Request.from_consumer_and_token(oauth_consumer,
+                                                token=oauth_token,
+                                                http_method=method,
+                                                http_url=url,
+                                                parameters=params)
+
+    req.sign_request(signature_method_hmac_sha1, oauth_consumer, oauth_token)
+
+    headers = req.to_header()
+
+    if method == "POST":
+        encoded_post_data = req.to_postdata()
+    else:
+        encoded_post_data = None
+        url = req.to_url()
+
+    opener = urllib.OpenerDirector()
+    opener.add_handler(http_handler)
+    opener.add_handler(https_handler)
+
+    response = opener.open(url, encoded_post_data)
+
+    return response
+
+def post_tweet(tweet):
+    url = "https://api.twitter.com/1.1/statuses/update.json"
+    params = [("status", tweet)]
+    response = json.loads(twitterreq(url, "POST", params).readline())
+    if "errors" in response:
+        msg = response["errors"][0]["message"]
+        raise Exception(msg)
+    else:
+        print "Tweeted: {tweet}".format(tweet=tweet)
+
+def get_user_id(user=None):
+    url = "https://api.twitter.com/1.1"
+    user_id = None
+    if not user:
+        url += '/account/verify_credentials.json'
+        params = []
+        response = json.loads(twitterreq(url, "GET", params).readline())
+        user_id = response['id']
+    else:
+        url += '/users/lookup.json'
+        params = [('screen_name', user)]
+        response = json.loads(twitterreq(url, "GET", params).readline())
+        user_id = response[0]['id']
+    return user_id
+
+def show_tweets(user=None, count=None):
+    url = "https://api.twitter.com/1.1/statuses/user_timeline.json"
+    user_id = get_user_id(user=user)
+    params=[("user_id", user_id), ("count", 10 if count == None else count), ("include_rts", 1)]
+    response = json.loads(twitterreq(url, "GET", params).readline())
+
+    for i, tweet in enumerate(response):
+        index = i+1
+        tweet_text=HTMLParser().unescape(tweet['text'].encode('utf-8'))
+        print "{index}. {tweet}".format(index=index, tweet=tweet_text)
+
+def delete_tweet(index=None):
+    url = "https://api.twitter.com/1.1/statuses/destroy/"
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--number', metavar='', help='Number of Tweets to show', default=None)
+    parser.add_argument('-u', '--user', metavar='', help='User to show Tweets from', default=None)
+    parser.add_argument('-i', '--index', metavar='', help='Delete Tweet from index', default=None)
+    parser.add_argument('action')
+    args = vars(parser.parse_args())
+
+    action = args['action']
+    index = args['index']
+    number = args['number']
+    user = args['user']
+
+    if action == 'show':
+        show_tweets(user=user, count=number)
+    elif action == 'delete':
+        delete_tweet(index=index)
+    else:
+        post_tweet(action)
